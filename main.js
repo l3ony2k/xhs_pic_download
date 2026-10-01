@@ -2,7 +2,7 @@ const axios = require('axios')
 const cheerio = require('cheerio');
 
 // 只请求小红书的域名，避免服务被用来访问任意地址（SSRF）
-const ALLOWED_HOSTS = /(^|\.)(xhslink\.com|xiaohongshu\.com)$/i
+const ALLOWED_HOSTS = /(^|\.)(xhslink\.(com|cn)|xiaohongshu\.com)$/i
 function assertAllowed(url) {
   const u = new URL(url)
   if (!/^https?:$/.test(u.protocol) || !ALLOWED_HOSTS.test(u.hostname)) {
