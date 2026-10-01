@@ -1,6 +1,25 @@
 const axios = require('axios')
 const cheerio = require('cheerio');
 
+// 只请求小红书的域名，避免服务被用来访问任意地址（SSRF）
+const ALLOWED_HOSTS = /(^|\.)(xhslink\.com|xiaohongshu\.com)$/i
+function assertAllowed(url) {
+  const u = new URL(url)
+  if (!/^https?:$/.test(u.protocol) || !ALLOWED_HOSTS.test(u.hostname)) {
+    throw new Error('只支持小红书链接')
+  }
+  return u.toString()
+}
+const REQUEST_OPTIONS = {
+  timeout: 15000,
+  maxContentLength: 5 * 1024 * 1024,
+  beforeRedirect: (options) => {
+    if (!ALLOWED_HOSTS.test(options.hostname)) {
+      throw new Error('不允许跳转到非小红书域名')
+    }
+  },
+}
+
 module.exports = async function (params, context) {
   const shareText = params['shareText']
   const xhsCookie = params['xhsCookie']
@@ -42,15 +61,23 @@ async function getFullURL(shortURLWithText) {
   const headers = await getHeaders()
   // 正则表达式提取url
   const urlRegex = /(http[s]?:\/\/[^\s，]+)/;
-  const shortURL = shortURLWithText.match(urlRegex)[0];
+  const match = shortURLWithText.match(urlRegex)
+  if (!match) {
+    throw new Error('shareText中没有找到链接')
+  }
+  const shortURL = assertAllowed(match[0]);
   try {
     const response = await axios.get(shortURL, {
       headers,
+      ...REQUEST_OPTIONS,
       maxRedirects: 0
     })
     return shortURL
   } catch (error) {
-    return error.response.headers.location
+    if (!error.response || !error.response.headers.location) {
+      throw error
+    }
+    return assertAllowed(new URL(error.response.headers.location, shortURL).toString())
   }
 }
 
@@ -73,8 +100,8 @@ async function findDom(htmlContent) {
 
     if (startIndex !== -1 && endIndex !== -1) {
       const jsonString = initialStateScript.substring(startIndex, endIndex + 1);
-      const unescapedString = jsonString.replace(/\\u([\d\w]{4})/gi, (match, grp) => String.fromCharCode(parseInt(grp, 16)));
-      initialState = eval('(' + unescapedString + ')');
+      // 不能用 eval 执行远程内容；该对象除了值为 undefined 的字段外就是合法 JSON
+      initialState = JSON.parse(jsonString.replace(/([:\[,])\s*undefined(?=\s*[,}\]])/g, '$1null'));
     }
   }
   return initialState
@@ -85,8 +112,10 @@ async function getPicUrl(fullUrl, xhsCookie) {
   if (xhsCookie) {
     headers['cookie'] = xhsCookie
   }
-  const response = await axios.get(fullUrl, {
-    headers
+  const response = await axios.get(assertAllowed(fullUrl), {
+    headers,
+    ...REQUEST_OPTIONS,
+    maxRedirects: 3
   })
   const responseData = response.data
   const resultObj = await findDom(responseData)
@@ -116,7 +145,7 @@ async function getPicUrl(fullUrl, xhsCookie) {
 
   imageList.forEach((item) => {
     try {
-      livePhotoVideoUrl = item?.stream?.h264?.[0]?.masterUrl
+      const livePhotoVideoUrl = item?.stream?.h264?.[0]?.masterUrl
       if(livePhotoVideoUrl){
         picUrlArray.push(livePhotoVideoUrl)
       }
