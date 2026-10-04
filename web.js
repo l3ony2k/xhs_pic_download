@@ -4,7 +4,8 @@ var express = require("express");
 const bodyParser = require('body-parser');
 var app = express();
 
-app.use(bodyParser.json());
+app.disable("x-powered-by");
+app.use(bodyParser.json({ limit: "16kb" }));
 
 app.all("/getXhsPicUrl", async function (req, res) {
   res.set("Content-Type", "application/json");
@@ -31,5 +32,7 @@ app.all("/getXhsPicUrl", async function (req, res) {
     }));
   }
 });
+
+app.get("/healthz", (req, res) => res.send("ok"));
 
 app.listen(7776);
